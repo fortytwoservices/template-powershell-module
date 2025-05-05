@@ -55,6 +55,10 @@ jobs:
           }
           
           # Import the module
+          $RequiredModules = [ScriptBlock]::Create((Get-Content -Raw $psd1.FullName)).Invoke().RequiredModules
+          if($RequiredModules) {
+            $RequiredModules | ForEach-Object {New-Module -Name $_ -ScriptBlock {} | Import-Module}
+          }
           $ModulePath = $psd1.FullName | Split-Path -Parent
           $Module = Import-Module $ModulePath -Verbose -Force -PassThru
           
