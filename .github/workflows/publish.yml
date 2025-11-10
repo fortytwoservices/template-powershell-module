@@ -15,13 +15,7 @@ jobs:
         shell: pwsh
         run: |
           $psd1 = Get-ChildItem -Recurse -Include *.psd1
-          $RequiredModules = [ScriptBlock]::Create((Get-Content -Raw $psd1.FullName)).Invoke().RequiredModules
-          if($RequiredModules) {
-            $RequiredModules | ForEach-Object {
-              Write-Host "Installing required module - $($_)"
-              Install-Module -Name $_ -Force -Confirm:$false
-            }
-          }
+          $psd1 | Import-PowerShellDataFile | Where-Object RequiredModules | Select-Object -ExpandProperty RequiredModules | Sort-Object -Unique | ForEach-Object {Install-Module -Scope CurrentUser -Force -Confirm:$false -Name $_}
 
           $psd1 |
           ForEach-Object {
