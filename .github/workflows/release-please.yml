@@ -13,7 +13,7 @@ permissions:
 jobs:
 
   update-readme:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
     name: Update psd1 and documentation
     runs-on: ubuntu-latest
     steps:
