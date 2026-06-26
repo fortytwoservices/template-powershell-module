@@ -38,7 +38,13 @@ jobs:
             if($RequiredModules) {
               $RequiredModules | ForEach-Object {
                 Write-Host "Installing required module - $($_)"
-                Install-PSResource -Name $_ -Confirm:$false -Repository FortytwoInternal -Scope CurrentUser
+                try {
+                  Write-Host "Installing required module from FortytwoInternal - $($_)"
+                  Install-PSResource -Name $_ -Confirm:$false -Repository FortytwoInternal -Scope CurrentUser -ErrorAction Stop
+                } catch {
+                  Write-Host "Module not found in FortytwoInternal, falling back to PSGallery - $($_)"
+                  Install-PSResource -Name $_ -Confirm:$false -Repository PSGallery -TrustRepository -Scope CurrentUser
+                } 
               }
             }
 
