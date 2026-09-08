@@ -69,7 +69,7 @@ jobs:
               ForEach-Object {if($_ -like "*ModuleVersion*=*"){"    ModuleVersion = '$releasePleaseVersion'"} else {$_}} | 
               ForEach-Object {if($_ -like "*CmdletsToExport*'`*'*" -or $_ -like "*CmdletsToExport*@(*)*"){"    CmdletsToExport = @('{0}')" -f ($module.ExportedFunctions.Keys -join "','")} else {$_}} | 
               Out-String).Trim() | 
-              Set-Content $psd1.FullName
+              Set-Content -Encoding utf8BOM $psd1.FullName
           }
           
           # Generate README.md
