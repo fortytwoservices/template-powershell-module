@@ -12,7 +12,7 @@ jobs:
       id-token: write
     steps:
     - name: Checkout
-      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 2
     - name: Azure Login
@@ -28,7 +28,58 @@ jobs:
         Write-Host "Registering repository"
         Register-PSResourceRepository -Name FortytwoInternal -Uri "${{ vars.FORTYTWO_INTERNAL_POWERSHELL_REPOSITORY }}" -Trusted -Priority 1
         Set-PSResourceRepository -Name PSGallery -Trusted:$true
-        Get-ChildItem -Recurse -Include *.psd1 | Import-PowerShellDataFile | Where-Object RequiredModules | Select-Object -ExpandProperty RequiredModules | Sort-Object -Unique | ForEach-Object {Install-PSResource -Scope CurrentUser -Confirm:$false -Name $_}
+        $requiredModules = Get-ChildItem -Recurse -Include *.psd1 |
+          ForEach-Object { Import-PowerShellDataFile $_.FullName } |
+          ForEach-Object RequiredModules
+
+        $requiredModuleSpecifications = $requiredModules | ForEach-Object {
+          $name = $null
+          $minimumVersion = $null
+
+          if($_ -is [string]) {
+            $name = $_
+          } elseif($_ -is [System.Collections.IDictionary]) {
+            if($_.Contains('ModuleName')) { $name = $_['ModuleName'] }
+            if($_.Contains('ModuleVersion')) { $minimumVersion = $_['ModuleVersion'] }
+          } elseif($_.PSObject.Properties.Name -contains 'ModuleName') {
+            $name = $_.ModuleName
+            if($_.PSObject.Properties.Name -contains 'ModuleVersion') {
+              $minimumVersion = $_.ModuleVersion
+            }
+          }
+
+          if([string]::IsNullOrWhiteSpace([string]$name)) {
+            throw "RequiredModules contains an entry without a valid ModuleName."
+          }
+
+          [pscustomobject]@{
+            Name = [string]$name
+            MinimumVersion = if($minimumVersion) { [string]$minimumVersion } else { $null }
+          }
+        }
+
+        $requiredModuleSpecifications |
+          Group-Object Name |
+          ForEach-Object { $_.Group | Select-Object -First 1 } |
+          ForEach-Object {
+            $moduleName = $_.Name
+            $parameters = @{
+              Name = $moduleName
+              Scope = 'CurrentUser'
+              Confirm = $false
+              ErrorAction = 'Stop'
+            }
+            if($_.MinimumVersion) {
+              $parameters.Version = "[$($_.MinimumVersion), ]"
+            }
+
+            try {
+              Install-PSResource @parameters -Repository FortytwoInternal
+            } catch {
+              Write-Host "Module '$moduleName' was not found in FortytwoInternal; trying PSGallery."
+              Install-PSResource @parameters -Repository PSGallery -TrustRepository
+            }
+          }
         Invoke-Pester -ExcludeTagFilter "WindowsOnly"
       env:
         PESTERSECRET1: ${{ secrets.PESTERSECRET1 }}

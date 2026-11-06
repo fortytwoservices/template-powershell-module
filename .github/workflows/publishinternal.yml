@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         
       - name: Azure Login
         uses: azure/login@v3
@@ -34,16 +34,55 @@ jobs:
 
             Write-Host "Processing required modules"
             $psd1 = Get-ChildItem -Recurse -Include *.psd1
-            $RequiredModules = [ScriptBlock]::Create((Get-Content -Raw $psd1.FullName)).Invoke().RequiredModules
+            $RequiredModules = Import-PowerShellDataFile $psd1.FullName | ForEach-Object RequiredModules
             if($RequiredModules) {
-              $RequiredModules | ForEach-Object {
-                Write-Host "Installing required module - $($_)"
+              $RequiredModuleSpecifications = $RequiredModules | ForEach-Object {
+                $name = $null
+                $minimumVersion = $null
+
+                if($_ -is [string]) {
+                  $name = $_
+                } elseif($_ -is [System.Collections.IDictionary]) {
+                  if($_.Contains('ModuleName')) { $name = $_['ModuleName'] }
+                  if($_.Contains('ModuleVersion')) { $minimumVersion = $_['ModuleVersion'] }
+                } elseif($_.PSObject.Properties.Name -contains 'ModuleName') {
+                  $name = $_.ModuleName
+                  if($_.PSObject.Properties.Name -contains 'ModuleVersion') {
+                    $minimumVersion = $_.ModuleVersion
+                  }
+                }
+
+                if([string]::IsNullOrWhiteSpace([string]$name)) {
+                  throw "RequiredModules contains an entry without a valid ModuleName."
+                }
+
+                [pscustomobject]@{
+                  Name = [string]$name
+                  MinimumVersion = if($minimumVersion) { [string]$minimumVersion } else { $null }
+                }
+              }
+
+              $RequiredModuleSpecifications |
+              Group-Object Name |
+              ForEach-Object { $_.Group | Select-Object -First 1 } |
+              ForEach-Object {
+                $parameters = @{
+                  Name = $_.Name
+                  Confirm = $false
+                  Scope = 'CurrentUser'
+                  ErrorAction = 'Stop'
+                }
+                if($_.MinimumVersion) {
+                  $parameters.Version = "[$($_.MinimumVersion), ]"
+                }
+
+                Write-Host "Installing required module - $($_.Name)"
                 try {
-                  Write-Host "Installing required module from FortytwoInternal - $($_)"
-                  Install-PSResource -Name $_ -Confirm:$false -Repository FortytwoInternal -Scope CurrentUser -ErrorAction Stop
+                  Write-Host "Installing required module from FortytwoInternal - $($_.Name)"
+                  Install-PSResource @parameters -Repository FortytwoInternal
                 } catch {
-                  Write-Host "Module not found in FortytwoInternal, falling back to PSGallery - $($_)"
-                  Install-PSResource -Name $_ -Confirm:$false -Repository PSGallery -TrustRepository -Scope CurrentUser
+                  Write-Host "Module not found in FortytwoInternal, falling back to PSGallery - $($_.Name)"
+                  Install-PSResource @parameters -Repository PSGallery -TrustRepository
                 } 
               }
             }

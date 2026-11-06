@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
           ref: ${{ github.event.pull_request.head.ref }}
@@ -39,16 +39,27 @@ jobs:
           }
           
           # Import the module
-          $RequiredModules = [ScriptBlock]::Create((Get-Content -Raw $psd1.FullName)).Invoke().RequiredModules
+          $RequiredModules = Import-PowerShellDataFile $psd1.FullName | ForEach-Object RequiredModules
           if($RequiredModules) {
             $RequiredModules | ForEach-Object {
-              $ModuleName = $_
-              Write-Host "Installing required module $ModuleName"
+              $name = if ($_ -is [string]) { $_ } else { $_.ModuleName }
+              $minimumVersion = if ($_ -is [string]) { $null } else { $_.ModuleVersion }
+              $parameters = @{
+                Name = $name
+                Scope = 'CurrentUser'
+                Confirm = $false
+                Force = $true
+              }
+              if($minimumVersion) {
+                $parameters.MinimumVersion = $minimumVersion
+              }
+
+              Write-Host "Installing required module $name"
               try {
-                Install-Module -Name $ModuleName -Scope CurrentUser -Confirm:$false -Force
+                Install-Module @parameters -ErrorAction Stop
               } catch {
-                Write-Warning "Failed to install required module $ModuleName, instead we will import a dummy module to replace this requirement."
-                New-Module $ModuleName -ScriptBlock {} | Import-Module -Global
+                Write-Warning "Failed to install required module $name, instead we will import a dummy module to replace this requirement."
+                New-Module $name -ScriptBlock {} | Import-Module -Global
               }
             }
           }
@@ -64,9 +75,18 @@ jobs:
                   exit 1
               }
       
-              # Replace the ModuleVersion line in the psd1 file
-              (Get-Content $psd1.FullName | 
-              ForEach-Object {if($_ -like "*ModuleVersion*=*"){"    ModuleVersion = '$releasePleaseVersion'"} else {$_}} | 
+              # Replace only the manifest's top-level ModuleVersion. RequiredModules can also
+              # contain ModuleVersion entries and must retain their dependency versions.
+              $moduleVersionUpdated = $false
+              (Get-Content $psd1.FullName |
+              ForEach-Object {
+                  if(-not $moduleVersionUpdated -and $_ -match '^\s*ModuleVersion\s*=') {
+                      $moduleVersionUpdated = $true
+                      "    ModuleVersion = '$releasePleaseVersion'"
+                  } else {
+                      $_
+                  }
+              } |
               ForEach-Object {if($_ -like "*CmdletsToExport*'`*'*" -or $_ -like "*CmdletsToExport*@(*)*"){"    CmdletsToExport = @('{0}')" -f ($module.ExportedFunctions.Keys -join "','")} else {$_}} | 
               Out-String).Trim() | 
               Set-Content -Encoding utf8BOM $psd1.FullName
